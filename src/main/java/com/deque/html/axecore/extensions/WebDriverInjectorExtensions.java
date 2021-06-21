@@ -16,6 +16,8 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 import javax.naming.OperationNotSupportedException;
+
+import com.deque.html.axecore.selenium.AxeScript;
 import org.openqa.selenium.By;
 import org.openqa.selenium.JavascriptExecutor;
 import org.openqa.selenium.JavascriptException;
@@ -151,6 +153,42 @@ public final class WebDriverInjectorExtensions {
       js.executeScript(script);
 
       injectIntoFramesAsync(driver, script);
+
+      driver.switchTo().parentFrame();
+    }
+  }
+
+  public static void inject(WebDriver driver, ArrayList<AxeScript> axeScripts, boolean disableIframeTesting) {
+    JavascriptExecutor js = (JavascriptExecutor) driver;
+
+    driver.switchTo().defaultContent();
+    for (AxeScript axeScript : axeScripts) {
+      js.executeScript(axeScript.getScript());
+    }
+
+    if (!disableIframeTesting) {
+      try {
+        injectIntoFrames(driver, axeScripts);
+      } catch (Exception e) {
+        // Ignore all errors except those caused by the injected javascript itself
+        if (e instanceof JavascriptException) {
+          throw e;
+        }
+      }
+    }
+  }
+
+  private static void injectIntoFrames(final WebDriver driver, ArrayList<AxeScript> axeScripts) {
+    JavascriptExecutor js = (JavascriptExecutor) driver;
+    List<WebElement> frames = driver.findElements(By.tagName("iframe"));
+
+    for (WebElement frame : frames) {
+      driver.switchTo().frame(frame);
+      for (AxeScript axeScript : axeScripts) {
+        js.executeScript(axeScript.getScript());
+      }
+
+      injectIntoFrames(driver, axeScripts);
 
       driver.switchTo().parentFrame();
     }

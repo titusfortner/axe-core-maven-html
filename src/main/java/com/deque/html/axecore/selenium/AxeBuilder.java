@@ -77,6 +77,7 @@ public class AxeBuilder {
    * timeout of how the the scan should run until an error occurs.
    */
   private int timeout = 30; // 30 seconds as default.
+  private boolean timeoutChanged = false;
 
   private final ObjectMapper objectMapper;
 
@@ -95,6 +96,8 @@ public class AxeBuilder {
     "});";
 
   public final String iframeAllowScript = "axe.configure({ allowedOrigins: ['<unsafe_all_origins>'] });";
+
+  private final AxeScript iframeAllow = new AxeScript(iframeAllowScript, "Error when enabling iframe communication", "synchronous");
 
   public final String sandboxBusterScript =
     "const callback = arguments[arguments.length - 1];" +
@@ -115,6 +118,8 @@ public class AxeBuilder {
     "  return promise;" +
     "};" +
     "Promise.all(iframes.map(replaceSandboxedIframe)).then(callback);";
+
+  private final AxeScript sandboxBuster = new AxeScript(sandboxBusterScript, "Error when removing sandbox from iframes", "asynchronous");
 
   /**
    * get the default axe builder options.
@@ -143,6 +148,7 @@ public class AxeBuilder {
    */
   public AxeBuilder setTimeout(final int newTimeout) {
     timeout = newTimeout;
+    timeoutChanged = true;
     return this;
   }
 
@@ -432,32 +438,33 @@ public class AxeBuilder {
     String rawOptionsArg = getOptions().equals("{}")
         ? AxeReporter.serialize(runOptions) : getOptions();
     Object[] rawArgs = new Object[] {rawContextArg, rawOptionsArg};
+    ArrayList<AxeScript> axeScripts = new ArrayList<>();
 
     if (noSandbox) {
-      try {
-        WebDriverInjectorExtensions.injectAsync(
-            webDriver, sandboxBusterScript, disableIframeTesting);
-      } catch (Exception e) {
-          throw new RuntimeException("Error when removing sandbox from iframes", e);
-      }
+      axeScripts.add(sandboxBuster);
     }
 
-    if (injectAxe) {
-      try {
-        WebDriverInjectorExtensions.inject(
-            webDriver, builderOptions.getScriptProvider(), disableIframeTesting);
-      } catch (Exception e) {
-          throw new RuntimeException("Unable to inject axe script", e);
-      }
+    IAxeScriptProvider scriptProvider = builderOptions.getScriptProvider();
+    if (scriptProvider == null) {
+      throw new NullPointerException("the Script provider is null");
     }
+
     try {
-      WebDriverInjectorExtensions.inject(
-          webDriver, iframeAllowScript, disableIframeTesting);
-    } catch (Exception e) {
-        throw new RuntimeException("Error when enabling iframe communication", e);
+      AxeScript axeInject = new AxeScript(scriptProvider.getScript(), "Unable to inject axe script", "synchronous");
+      axeScripts.add(axeInject);
+    } catch (OperationNotSupportedException | IOException ignored) {
     }
-    webDriver.manage().timeouts()
-        .setScriptTimeout(timeout, TimeUnit.SECONDS);
+
+    if (!disableIframeTesting) {
+      axeScripts.add(iframeAllow);
+    }
+
+      WebDriverInjectorExtensions.inject(webDriver, axeScripts, disableIframeTesting);
+
+    if (timeoutChanged) {
+      webDriver.manage().timeouts()
+              .setScriptTimeout(timeout, TimeUnit.SECONDS);
+    }
 
     Object response = null;
     try {
